@@ -1,4 +1,5 @@
-import { findGeminiTarget, listTargets } from './app.js';
+import { classifyTargets, listTargets } from './app.js';
+import { AuthRequiredError, SIGN_IN_HINT } from './auth.js';
 
 export class CdpClient {
   constructor(webSocketUrl, { defaultTimeoutMs = 30000 } = {}) {
@@ -11,11 +12,21 @@ export class CdpClient {
   }
 
   static async connect(port) {
-    const target = await findGeminiTarget(port);
-    if (!target) {
-      const targets = await listTargets(port).catch(() => []);
-      throw new Error(`No Gemini page target on port ${port}. Targets: ${targets.map((t) => t.url).join(', ') || 'none'}`);
+    const classified = classifyTargets(await listTargets(port));
+    if (!classified.gemini) {
+      if (classified.signIn || classified.accounts) {
+        const url = classified.signIn?.url || classified.accounts?.url || null;
+        throw new AuthRequiredError(`Gemini is not signed in (${url}). ${SIGN_IN_HINT}`, { url });
+      }
+      const targets = classified.pages.map((target) => target.url);
+      throw new Error(`No Gemini page target on port ${port}. Targets: ${targets.join(', ') || 'none'}`);
     }
+    const client = new CdpClient(classified.gemini.webSocketDebuggerUrl);
+    await client.open();
+    return client;
+  }
+
+  static async connectTarget(target) {
     const client = new CdpClient(target.webSocketDebuggerUrl);
     await client.open();
     return client;

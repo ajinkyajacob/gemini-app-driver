@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CdpClient } from './cdp.js';
-import { sleep } from './app.js';
+import { classifyTargets, getAuthState, listTargets, sleep } from './app.js';
+import { AuthRequiredError, SIGN_IN_HINT } from './auth.js';
 
 const GEMINI_URL = 'https://gemini.google.com/app';
 
@@ -54,6 +55,17 @@ const SNAPSHOT_JS = `(() => {
   const modeOptions = modeRow
     ? [...modeRow.querySelectorAll('gem-segmented-button')].map((s) => (s.innerText || '').trim().toLowerCase())
     : [];
+  const accountEl = document.querySelector('[aria-label^="Google Account:"]');
+  const accountLabel = accountEl ? accountEl.getAttribute('aria-label') || '' : '';
+  const accountStart = accountLabel.indexOf('(');
+  const accountEnd = accountLabel.indexOf(')', accountStart + 1);
+  const account = accountStart >= 0 && accountEnd > accountStart
+    ? accountLabel.slice(accountStart + 1, accountEnd)
+    : null;
+  const picker = document.querySelector('button[aria-label^="Open mode picker"]');
+  const pickerLabel = picker ? picker.getAttribute('aria-label') || '' : '';
+  const pickerIndex = pickerLabel.toLowerCase().indexOf('currently ');
+  const modelName = pickerIndex >= 0 ? pickerLabel.slice(pickerIndex + 'currently '.length).trim() : null;
   return {
     url: location.href,
     conversationId: conversation,
@@ -62,9 +74,10 @@ const SNAPSHOT_JS = `(() => {
     editorPlaceholder: editor ? editor.getAttribute('data-placeholder') : null,
     streaming: Boolean(stop),
     messages,
-    model: mode ? textOf(mode).slice(0, 60) : null,
+    model: modelName,
     mode: selected ? (selected.innerText || '').trim().toLowerCase() : null,
     modeOptions,
+    account,
   };
 })()`;
 
@@ -132,8 +145,10 @@ export class GeminiApp {
         return null;
       });
       if (snap) {
-        if (/accounts\.google\.com/.test(snap.url)) {
-          throw new Error('Gemini is showing a Google sign-in page. Sign in inside the app once, then retry.');
+        if (/accounts\.google\.com|\/sign_in\//.test(snap.url)) {
+          throw new AuthRequiredError(`Gemini is asking for a Google sign-in (${snap.url}). ${SIGN_IN_HINT}`, {
+            url: snap.url,
+          });
         }
         if (snap.editorText !== null) return snap;
         last = new Error(`Gemini page not ready (url: ${snap.url}).`);
@@ -141,6 +156,79 @@ export class GeminiApp {
       await sleep(400);
     }
     throw new Error(`Gemini composer did not appear. ${last ? last.message : ''}`.trim());
+  }
+
+  async authStatusImpl() {
+    const state = await getAuthState(this.port);
+    const base = {
+      state: state.state,
+      url: state.url,
+      targets: state.targets,
+    };
+    if (state.state !== 'signed-in') {
+      return { ...base, account: null, composerReady: false, hint: state.state === 'sign-in-required' ? SIGN_IN_HINT : null };
+    }
+    try {
+      const snap = await this.snapshot();
+      return {
+        ...base,
+        url: snap.url,
+        account: snap.account,
+        conversationId: snap.conversationId,
+        composerReady: snap.editorText !== null,
+        hint: null,
+      };
+    } catch (error) {
+      return { ...base, account: null, composerReady: false, hint: error?.message || null };
+    }
+  }
+
+  authStatus() {
+    return this.serialize(() => this.authStatusImpl());
+  }
+
+  async bringToFrontImpl() {
+    const classified = classifyTargets(await listTargets(this.port));
+    const target = classified.gemini || classified.signIn || classified.accounts || classified.appPage;
+    if (!target) return false;
+    const client = await CdpClient.connectTarget(target);
+    try {
+      await client.send('Page.bringToFront').catch(() => {});
+    } finally {
+      client.close();
+    }
+    return true;
+  }
+
+  async loginImpl({ timeoutMs = 300000 } = {}) {
+    await this.bringToFrontImpl();
+    const deadline = Date.now() + timeoutMs;
+    let last = await getAuthState(this.port);
+
+    while (Date.now() < deadline) {
+      last = await getAuthState(this.port);
+      if (last.state === 'signed-in') {
+        try {
+          const snap = await this.ready({ timeoutMs: 30000 });
+          return { signedIn: true, url: snap.url, account: snap.account, hint: null };
+        } catch (error) {
+          if (!(error instanceof AuthRequiredError)) throw error;
+          last = { state: 'sign-in-required', url: error.url || last.url };
+        }
+      }
+      await sleep(1500);
+    }
+
+    return {
+      signedIn: false,
+      state: last.state,
+      url: last.url,
+      hint: last.state === 'sign-in-required' ? SIGN_IN_HINT : 'Gemini page did not become usable in time.',
+    };
+  }
+
+  login(options) {
+    return this.serialize(() => this.loginImpl(options));
   }
 
   async focusEditor() {
@@ -537,7 +625,7 @@ export class GeminiApp {
   async modelsImpl() {
     await this.waitForToolbar();
     if (!(await this.openModelPicker())) throw new Error('Gemini model picker was not found on the page.');
-    const current = await this.evaluate(`(() => {
+    const pill = await this.evaluate(`(() => {
       const button = [...document.querySelectorAll('button')]
         .find((b) => /open mode picker/i.test(b.getAttribute('aria-label') || ''));
       const match = (button?.getAttribute('aria-label') || '').match(/currently (.+)$/i);
@@ -545,17 +633,21 @@ export class GeminiApp {
     })()`);
     const models = await this.evaluate(`(() => {
       const panes = [...document.querySelectorAll('.cdk-overlay-pane')].filter((p) => p.getClientRects().length);
+      const isModelLine = (line) => ['flash', 'pro', 'argon', 'ultra'].some((word) => line.toLowerCase().includes(word));
       const seen = new Set();
       const out = [];
       for (const pane of panes) {
         for (const node of pane.querySelectorAll('[role="menuitemradio"]')) {
           if (!node.getClientRects().length) continue;
-          const name = ((node.innerText || '').trim().split('\\n')[0] || '').trim();
+          const lines = (node.innerText || '').split('\\n').map((line) => line.trim()).filter(Boolean);
+          if (lines.length === 0) continue;
+          const name = lines.find(isModelLine) || lines[0];
+          const description = lines.find((line) => line !== name) || '';
           if (!name || seen.has(name)) continue;
           seen.add(name);
           out.push({
             name,
-            description: ((node.innerText || '').trim().split('\\n')[1] || '').trim(),
+            description,
             id: node.getAttribute('data-mode-id'),
             selected: node.getAttribute('aria-checked') === 'true',
           });
@@ -577,7 +669,8 @@ export class GeminiApp {
       options: levels.map((item) => item.name.toLowerCase()),
     };
     await this.closeOverlays();
-    return { current, models, thinking };
+    const selected = models.find((model) => model.selected);
+    return { current: selected ? selected.name : pill, pill, models, thinking };
   }
 
   models() {
@@ -639,20 +732,34 @@ export class GeminiApp {
     if (!wanted) throw new Error('model name is required');
     await this.waitForToolbar();
     if (!(await this.openModelPicker())) throw new Error('Gemini model picker was not found on the page.');
-    const clicked = await this.clickMenuItem(wanted);
-    await sleep(1200);
-    const current = await this.evaluate(`(() => {
-      const button = [...document.querySelectorAll('button')]
-        .find((b) => /open mode picker/i.test(b.getAttribute('aria-label') || ''));
-      const match = (button?.getAttribute('aria-label') || '').match(/currently (.+)$/i);
-      return match ? match[1].trim() : null;
+    const clicked = await this.evaluate(`(() => {
+      const panes = [...document.querySelectorAll('.cdk-overlay-pane')].filter((p) => p.getClientRects().length);
+      const wanted = ${JSON.stringify(wanted)}.toLowerCase();
+      const linesOf = (node) => (node.innerText || '')
+        .split('\\n').map((line) => line.trim().toLowerCase()).filter(Boolean);
+      const candidates = [];
+      for (const pane of panes) {
+        for (const node of pane.querySelectorAll('[role="menuitemradio"]')) {
+          if (node.getClientRects().length) candidates.push(node);
+        }
+      }
+      const target = candidates.find((node) => linesOf(node).some((line) => line === wanted))
+        || candidates.find((node) => linesOf(node).some((line) => line.includes(wanted) || wanted.includes(line)));
+      if (!target) return false;
+      (target.querySelector('button') || target).click();
+      return true;
     })()`);
+    await sleep(1000);
     await this.closeOverlays();
     if (!clicked) {
       const { models } = await this.modelsImpl();
       throw new Error(`Unknown model "${wanted}". Available: ${models.map((m) => m.name).join(', ')}`);
     }
-    if (!current || !(current.toLowerCase().includes(wanted.toLowerCase()) || wanted.toLowerCase().includes(current.toLowerCase()))) {
+    const state = await this.modelsImpl();
+    const current = state.current;
+    const ok = current
+      && (current.toLowerCase().includes(wanted.toLowerCase()) || wanted.toLowerCase().includes(current.toLowerCase()));
+    if (!ok) {
       throw new Error(`Gemini did not switch to "${wanted}" (current: ${current || 'unknown'}).`);
     }
     return { model: current, requested: wanted };

@@ -63,6 +63,7 @@ again.
 node bin/gemini-app-driver.js setup [--port 9333]
 node bin/gemini-app-driver.js restore
 node bin/gemini-app-driver.js status
+node bin/gemini-app-driver.js login [--timeout ms]
 node bin/gemini-app-driver.js ask [--new-chat] [--mode chat|task] [--tool "Create image"] [--attach path[,path]] [--timeout ms] [--json] <prompt>
 node bin/gemini-app-driver.js mode [chat|task]
 node bin/gemini-app-driver.js model [name]
@@ -123,9 +124,10 @@ client, for example:
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
-| `gemini_status` | — | Version, patch state, app/CDP state, current conversation, model, streaming |
+| `gemini_status` | — | Version, patch state, app/CDP state, auth state, current conversation, model, streaming |
 | `gemini_setup` | `port?` | Patch the app and restart it in debug mode (re-run after updates) |
 | `gemini_restore` | — | Restore the original `app.asar` and restart normally |
+| `gemini_login` | `timeout_ms?` | Bring the app forward and wait for sign-in to finish; returns `signedIn` + account |
 | `gemini_ask` | `prompt`, `new_chat?`, `mode?`, `thinking?`, `tools?`, `attachments?`, `timeout_ms?` | Send a prompt, wait for completion, return `{answer, images, conversationId, url, timedOut}` |
 | `gemini_model` | `model?` | List models or switch model (`3.8 Flash`, `3.1 Pro`, `4 Argon`, …) |
 | `gemini_thinking` | `level?` | Read or switch the Thinking level (`low` / `medium` / `high`) |
@@ -139,6 +141,29 @@ client, for example:
 | `gemini_open` | `conversation` | Open by id or partial title; returns its messages |
 | `gemini_stop` | — | Stop an in-flight response |
 | `gemini_screenshot` | `path?` | Page screenshot as an MCP image (+ saved path) |
+
+## Sign-in and auth
+
+The driver rides the Google session already present in the desktop app. It never
+enters credentials and never asks for your password.
+
+- `status` reports `auth.state` as `signed-in`, `sign-in-required`, or `unknown`,
+  plus the signed-in `account` email and a `hint`.
+- Detection covers both the app's own sign-in screen
+  (`app://bundle/src/sign_in/sign_in.html`) and an OAuth redirect to
+  `accounts.google.com`. In either case, page actions fail with
+  `SIGN_IN_REQUIRED` and say what to do.
+- `login` brings the app window forward and waits for you to finish signing in,
+  then returns `{signedIn, url, account}`. Over MCP: `gemini_login`.
+
+```powershell
+node bin\gemini-app-driver.js status
+node bin\gemini-app-driver.js login --timeout 300000
+```
+
+If the session expires mid-run, the next action returns the same sign-in error;
+run `login` once and retry. Nothing restarts or patches differently for auth —
+`setup` also reports the auth state after launching.
 
 ## Chat vs Task mode
 

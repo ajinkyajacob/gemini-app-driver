@@ -30,6 +30,18 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'gemini_login',
+    description:
+      'Bring the Gemini app window forward and wait for the user to finish signing in (the driver cannot enter credentials). Returns signedIn plus the account email once the composer is ready.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        timeout_ms: { type: 'number', description: 'Maximum time to wait for sign-in (default 300000).' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'gemini_ask',
     description:
       'Send a prompt to Gemini in the desktop app, wait for the response to finish streaming, and return the answer text (and image count). Use new_chat to start a fresh conversation, mode for Chat/Task, tools to enable composer tools, and attachments to upload local files first.',
@@ -215,24 +227,33 @@ export class McpServer {
       port: this.port,
     };
     if (!cdp) return base;
+    const auth = await this.app.authStatus().catch((error) => ({ state: 'unknown', hint: error.message }));
+    const result = {
+      ...base,
+      auth: {
+        state: auth.state,
+        account: auth.account || null,
+        url: auth.url || null,
+        hint: auth.hint || null,
+      },
+    };
+    if (auth.state !== 'signed-in') return result;
     try {
       const snap = await this.app.snapshot();
-      return {
-        ...base,
-        page: {
-          url: snap.url,
-          conversationId: snap.conversationId,
-          model: snap.model,
-          mode: snap.mode,
-          modeOptions: snap.modeOptions,
-          streaming: snap.streaming,
-          messages: snap.messages.length,
-          composerEmpty: snap.editorEmpty,
-        },
+      result.page = {
+        url: snap.url,
+        conversationId: snap.conversationId,
+        model: snap.model,
+        mode: snap.mode,
+        modeOptions: snap.modeOptions,
+        streaming: snap.streaming,
+        messages: snap.messages.length,
+        composerEmpty: snap.editorEmpty,
       };
     } catch (error) {
-      return { ...base, pageError: error.message };
+      result.pageError = error.message;
     }
+    return result;
   }
 
   async ensure({ restart = true } = {}) {
@@ -260,6 +281,7 @@ export class McpServer {
                 port,
                 patched: result.guard.state === 'patched',
                 version: result.install.version,
+                auth: result.auth || 'unknown',
                 page: snap ? { url: snap.url, conversationId: snap.conversationId, model: snap.model } : null,
               }),
             },
@@ -274,6 +296,12 @@ export class McpServer {
             { type: 'text', text: jsonText({ ok: true, restored: result.changed, state: result.state, note: 'Gemini restarted without the DevTools port.' }) },
           ],
         };
+      }
+
+      case 'gemini_login': {
+        await this.ensure();
+        const result = await this.app.login({ timeoutMs: Number(args.timeout_ms || 300000) });
+        return { content: [{ type: 'text', text: jsonText(result) }] };
       }
 
       case 'gemini_ask': {

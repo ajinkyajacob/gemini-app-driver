@@ -10,7 +10,8 @@ const HELP = `gemini-app-driver — drive the Gemini desktop app from an agent
 Usage:
   gemini-app-driver setup [--port 9333]        patch the app and restart it with DevTools enabled
   gemini-app-driver restore                    restore the original app.asar and restart normally
-  gemini-app-driver status                     show install, patch, app and page state
+  gemini-app-driver status                     show install, patch, app, auth and page state
+  gemini-app-driver login [--timeout <ms>]     surface the app window and wait for sign-in to finish
   gemini-app-driver ask [options] <prompt>     send a prompt and print the answer
       --new-chat                               start a new conversation first
       --mode chat|task                         select Chat or Task mode (new chats only)
@@ -86,7 +87,14 @@ export async function main(argv = process.argv.slice(2)) {
         const result = await setup({ port, log });
         process.stdout.write(
           `${JSON.stringify(
-            { ok: true, port, version: result.install.version, patched: result.guard.state, asar: result.install.asarPath },
+            {
+              ok: true,
+              port,
+              version: result.install.version,
+              patched: result.guard.state,
+              auth: result.auth || 'unknown',
+              asar: result.install.asarPath,
+            },
             null,
             2,
           )}\n`,
@@ -112,18 +120,37 @@ export async function main(argv = process.argv.slice(2)) {
           port,
         };
         if (status.cdp) {
-          const snap = await app.snapshot();
-          status.page = {
-            url: snap.url,
-            conversationId: snap.conversationId,
-            model: snap.model,
-            mode: snap.mode,
-            modeOptions: snap.modeOptions,
-            streaming: snap.streaming,
-            messages: snap.messages.length,
+          const auth = await app.authStatus().catch((error) => ({ state: 'unknown', hint: error.message }));
+          status.auth = {
+            state: auth.state,
+            account: auth.account || null,
+            url: auth.url || null,
+            hint: auth.hint || null,
           };
+          if (auth.state === 'signed-in') {
+            const snap = await app.snapshot().catch(() => null);
+            if (snap) {
+              status.page = {
+                url: snap.url,
+                conversationId: snap.conversationId,
+                model: snap.model,
+                mode: snap.mode,
+                modeOptions: snap.modeOptions,
+                streaming: snap.streaming,
+                messages: snap.messages.length,
+              };
+            }
+          }
         }
         process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
+        return;
+      }
+
+      case 'login': {
+        await ensureCdp({ port, log });
+        const result = await app.login({ timeoutMs: Number(flags.timeout || 300000) });
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        if (!result.signedIn) process.exitCode = 2;
         return;
       }
 

@@ -27,11 +27,43 @@ export async function findGeminiTarget(port) {
   return targets.find((target) => target.type === 'page' && target.url.startsWith('https://gemini.google.com')) || null;
 }
 
+export function classifyTargets(targets) {
+  const pages = (targets || []).filter((target) => target.type === 'page');
+  return {
+    pages,
+    gemini: pages.find((target) => target.url.startsWith('https://gemini.google.com')) || null,
+    signIn: pages.find((target) => /\/sign_in\//.test(target.url)) || null,
+    accounts: pages.find((target) => target.url.startsWith('https://accounts.google.com')) || null,
+    appPage: pages.find((target) => target.url.startsWith('app://bundle')) || null,
+  };
+}
+
+export function authFromTargets(classified) {
+  if (classified.gemini) return 'signed-in';
+  if (classified.signIn || classified.accounts) return 'sign-in-required';
+  return 'unknown';
+}
+
+export async function getAuthState(port) {
+  let classified;
+  try {
+    classified = classifyTargets(await listTargets(port));
+  } catch {
+    return { state: 'unreachable', url: null, targets: [] };
+  }
+  return {
+    state: authFromTargets(classified),
+    url: classified.gemini?.url || classified.signIn?.url || classified.accounts?.url || null,
+    targets: classified.pages.map((target) => target.url),
+  };
+}
+
 export async function isCdpAlive(port) {
   try {
     const version = await fetchJson(cdpUrl(port), 1500);
     if (!version?.webSocketDebuggerUrl) return false;
-    return Boolean(await findGeminiTarget(port));
+    const classified = classifyTargets(await listTargets(port));
+    return Boolean(classified.gemini || classified.signIn || classified.accounts || classified.appPage);
   } catch {
     return false;
   }
@@ -110,9 +142,15 @@ export async function waitForCdp(port, { timeoutMs = 45000 } = {}) {
     try {
       const version = await fetchJson(cdpUrl(port), 1500);
       if (version?.webSocketDebuggerUrl) {
-        const target = await findGeminiTarget(port);
-        if (target) return { version, target };
-        lastError = new Error('Gemini page target not ready yet.');
+        const classified = classifyTargets(await listTargets(port));
+        if (classified.gemini || classified.signIn || classified.accounts) {
+          return {
+            version,
+            target: classified.gemini || classified.signIn || classified.accounts,
+            auth: authFromTargets(classified),
+          };
+        }
+        lastError = new Error('Gemini window is still loading.');
       }
     } catch (error) {
       lastError = error;
@@ -120,14 +158,16 @@ export async function waitForCdp(port, { timeoutMs = 45000 } = {}) {
     await sleep(400);
   }
   throw new Error(
-    `Timed out waiting for Gemini's DevTools endpoint on port ${port}. ${lastError ? lastError.message : ''}`.trim(),
+    `Timed out waiting for Gemini's DevTools endpoint on port ${port}. ${lastError ? lastError.message : ''} ` +
+      'If Gemini is asking you to sign in, sign in once in the app window, then run "login" (or retry).',
   );
 }
 
 export async function ensureCdp({ port = DEFAULT_PORT, restart = true, log = () => {} } = {}) {
   const install = resolveInstall();
   if (await isCdpAlive(port)) {
-    return { port, restarted: false, install, guard: guardStatus(install) };
+    const auth = await getAuthState(port);
+    return { port, restarted: false, install, guard: guardStatus(install), auth: auth.state, url: auth.url };
   }
 
   if (!restart) {
@@ -149,8 +189,15 @@ export async function ensureCdp({ port = DEFAULT_PORT, restart = true, log = () 
   if (guard.changed) log(`patched app.asar for v${install.version}`);
 
   launch(port, install);
-  await waitForCdp(port);
-  return { port, restarted: true, install, guard: guardStatus(install) };
+  const ready = await waitForCdp(port);
+  return {
+    port,
+    restarted: true,
+    install,
+    guard: guardStatus(install),
+    auth: ready.auth,
+    url: ready.target?.url || null,
+  };
 }
 
 export async function setup({ port = DEFAULT_PORT, log = () => {} } = {}) {
@@ -159,8 +206,8 @@ export async function setup({ port = DEFAULT_PORT, log = () => {} } = {}) {
   await quitApp();
   const guard = applyGuard(install);
   launch(port, install);
-  await waitForCdp(port);
-  return { port, install, guard };
+  const ready = await waitForCdp(port);
+  return { port, install, guard, auth: ready.auth, url: ready.target?.url || null };
 }
 
 export async function restore({ port = DEFAULT_PORT, restart = true, log = () => {} } = {}) {

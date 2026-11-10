@@ -133,7 +133,12 @@
       <div class="action read">
         <h4>gemini_status<span class="badge b-read">read</span></h4>
         <div class="cli">status</div>
-        <p>Version, patch state, running/CDP state, current conversation, model, streaming, message count.</p>
+        <p>Version, patch state, running/CDP state, auth state + account email, current conversation, model, streaming, message count.</p>
+      </div>
+      <div class="action control">
+        <h4>gemini_login<span class="badge b-control">control</span></h4>
+        <div class="cli">login [--timeout]</div>
+        <p>Brings the app forward and waits for manual sign-in (credentials are never handled); returns signedIn, url, account.</p>
       </div>
     </div>
   </div>
@@ -245,6 +250,7 @@
       <tr><td><code>gemini_setup</code></td><td><code>setup</code></td><td>control</td><td>patches app.asar, restarts Gemini</td></tr>
       <tr><td><code>gemini_restore</code></td><td><code>restore</code></td><td>control</td><td>restores app.asar, restarts Gemini</td></tr>
       <tr><td><code>gemini_status</code></td><td><code>status</code></td><td>read</td><td>none (may launch nothing)</td></tr>
+      <tr><td><code>gemini_login</code></td><td><code>login</code></td><td>control</td><td>waits for manual sign-in; never takes credentials</td></tr>
       <tr><td><code>gemini_ask</code></td><td><code>ask</code></td><td>write</td><td>adds a turn; optional mode, thinking, tools, attachments</td></tr>
       <tr><td><code>gemini_model</code></td><td><code>model</code></td><td>write</td><td>switches the selected model</td></tr>
       <tr><td><code>gemini_thinking</code></td><td><code>thinking</code></td><td>write</td><td>switches the thinking level</td></tr>
@@ -274,6 +280,10 @@
     <br><br>
     Attachments and enabled tools persist in the composer until the next send; a new chat resets them.
     When the answer is an image, <b>ask</b> returns <code>images</code> instead of text.
+    <br><br>
+    <b>Auth:</b> the driver uses the app's existing Google session. If the app shows its sign-in screen or
+    redirects to accounts.google.com, page actions fail with <code>SIGN_IN_REQUIRED</code>; run
+    <b>login</b> to surface the window and wait, then retry.
   </div>
 </div>
 </body>
