@@ -1,0 +1,19 @@
+{
+  "name": "gemini-app-driver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Drive the Gemini desktop app on Windows from an agent over Chrome DevTools Protocol, with a CLI and an MCP server.",
+  "type": "module",
+  "bin": {
+    "gemini-app-driver": "bin/gemini-app-driver.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "status": "node bin/gemini-app-driver.js status",
+    "setup": "node bin/gemini-app-driver.js setup",
+    "mcp": "node bin/gemini-app-driver.js mcp"
+  },
+  "license": "UNLICENSED"
+}

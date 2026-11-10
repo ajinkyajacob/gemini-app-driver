@@ -1,0 +1,7 @@
+node_modules/
+screenshots/
+*.log
+
+# agent harness state
+.commandcode/
+.opencode/

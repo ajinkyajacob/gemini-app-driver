@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gemini App Driver — Actions</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel2: #1d212a;
+    --line: #2b303b;
+    --text: #e6e9ef;
+    --muted: #98a1b0;
+    --accent: #6ea8fe;
+    --green: #5dd6a3;
+    --amber: #f0c674;
+    --pink: #e08ba8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 32px 64px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 26px; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 0 0 32px; }
+  h2 { font-size: 15px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); margin: 38px 0 14px; }
+  .row { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; }
+  .box {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 14px 16px;
+    min-width: 180px;
+  }
+  .box h3 { margin: 0 0 4px; font-size: 15px; }
+  .box p { margin: 0; color: var(--muted); font-size: 13px; }
+  .box .cmd { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--green); }
+  .center { justify-content: center; }
+  .arrow { display: flex; align-items: center; color: var(--muted); font-size: 22px; padding: 0 2px; }
+  .lane { display: grid; grid-template-columns: 190px 1fr; gap: 16px; align-items: start; }
+  .lane-label { font-size: 13px; color: var(--muted); padding-top: 10px; border-right: 1px solid var(--line); padding-right: 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+  .action {
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .action.control { border-left-color: var(--amber); }
+  .action.read { border-left-color: var(--green); }
+  .action.write { border-left-color: var(--pink); }
+  .action h4 { margin: 0 0 2px; font-size: 14px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .action .cli { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; color: var(--green); }
+  .action p { margin: 6px 0 0; font-size: 12.5px; color: var(--muted); }
+  .badge { display: inline-block; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 2px 6px; border-radius: 999px; margin-left: 6px; vertical-align: 2px; }
+  .b-control { background: rgba(240,198,116,.14); color: var(--amber); }
+  .b-read { background: rgba(93,214,163,.14); color: var(--green); }
+  .b-write { background: rgba(224,139,168,.14); color: var(--pink); }
+  .pipeline { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .step {
+    background: var(--panel2);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 7px 13px;
+    font-size: 13px;
+  }
+  .step b { color: var(--accent); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+  td code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--accent); }
+  .note { background: rgba(110,168,254,.07); border: 1px solid rgba(110,168,254,.28); border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #c9d4e6; }
+  .legend { display: flex; gap: 18px; font-size: 12px; color: var(--muted); margin-bottom: 10px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Gemini App Driver — what an agent can do</h1>
+  <p class="sub">Every action below is exposed twice: as an MCP tool (for agents) and as a CLI command (for humans and scripts).</p>
+
+  <h2>Entry points</h2>
+  <div class="row center">
+    <div class="box"><h3>Agent</h3><p>any MCP client</p></div>
+    <div class="arrow">→</div>
+    <div class="box"><h3>MCP server</h3><p class="cmd">gemini-app-driver mcp</p><p>stdio · JSON-RPC</p></div>
+    <div class="arrow">↘</div>
+    <div class="box" style="border-color:#3a4252">
+      <h3>Driver core</h3>
+      <p>guard · app · CDP · DOM ops</p>
+    </div>
+    <div class="arrow">↙</div>
+    <div class="box"><h3>CLI</h3><p class="cmd">gemini-app-driver &lt;cmd&gt;</p><p>stdout / stderr</p></div>
+  </div>
+
+  <h2>Two planes of action</h2>
+  <div class="row">
+    <div class="box" style="flex:1; min-width:320px; border-left:3px solid var(--amber)">
+      <h3>Control plane</h3>
+      <p>Manages the Gemini process and the patched archive. Uses the filesystem, <code>taskkill</code>/spawn, and the DevTools port.</p>
+    </div>
+    <div class="box" style="flex:1; min-width:320px; border-left:3px solid var(--green)">
+      <h3>Data plane</h3>
+      <p>Talks to the live gemini.google.com page over CDP: composer, send button, message DOM, screenshots.</p>
+    </div>
+  </div>
+
+  <h2>Available actions</h2>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--amber)"></i>control</span>
+    <span><i class="dot" style="background:var(--green)"></i>read-only</span>
+    <span><i class="dot" style="background:var(--pink)"></i>changes conversation</span>
+  </div>
+
+  <div class="lane" style="margin-bottom:18px">
+    <div class="lane-label">Runtime<br>access</div>
+    <div class="grid">
+      <div class="action control">
+        <h4>gemini_setup<span class="badge b-control">control</span></h4>
+        <div class="cli">setup [--port]</div>
+        <p>Patches app.asar, restarts Gemini with the DevTools port, waits for the page. Re-run after app updates.</p>
+      </div>
+      <div class="action control">
+        <h4>gemini_restore<span class="badge b-control">control</span></h4>
+        <div class="cli">restore</div>
+        <p>Puts the original app.asar back, restarts the app normally, closes the debug port.</p>
+      </div>
+      <div class="action read">
+        <h4>gemini_status<span class="badge b-read">read</span></h4>
+        <div class="cli">status</div>
+        <p>Version, patch state, running/CDP state, current conversation, model, streaming, message count.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="lane" style="margin-bottom:18px">
+    <div class="lane-label">Conversation<br>management</div>
+    <div class="grid">
+      <div class="action write">
+        <h4>gemini_new_chat<span class="badge b-write">write</span></h4>
+        <div class="cli">new-chat [--mode chat|task]</div>
+        <p>Navigates to a fresh /app conversation and returns its URL; optionally selects Chat or Task mode.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_mode<span class="badge b-write">write</span></h4>
+        <div class="cli">mode [chat|task]</div>
+        <p>Reads or switches the segmented Chat/Task control. Task reframes the composer ("Describe a task") and swaps suggestions. New chats only.</p>
+      </div>
+      <div class="action read">
+        <h4>gemini_read<span class="badge b-read">read</span></h4>
+        <div class="cli">read [--json]</div>
+        <p>Ordered <code>{role, text}</code> transcript of the current conversation, plus model and streaming state.</p>
+      </div>
+      <div class="action read">
+        <h4>gemini_conversations<span class="badge b-read">read</span></h4>
+        <div class="cli">conversations [--limit]</div>
+        <p>Sidebar conversations as <code>{id, title, href}</code>.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_open<span class="badge b-write">write</span></h4>
+        <div class="cli">open &lt;id|title&gt;</div>
+        <p>Opens a conversation by id or partial title, then returns its messages.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="lane" style="margin-bottom:18px">
+    <div class="lane-label">Composer<br>toolbar</div>
+    <div class="grid">
+      <div class="action write">
+        <h4>gemini_model<span class="badge b-write">write</span></h4>
+        <div class="cli">model [name]</div>
+        <p>Lists models (3.5 Flash-Lite, 3.8 Flash, 3.1 Pro, 4 Argon) and switches the selected one.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_thinking<span class="badge b-write">write</span></h4>
+        <div class="cli">thinking [low|medium|high]</div>
+        <p>Reads or switches the Thinking level submenu under the model picker.</p>
+      </div>
+      <div class="action read">
+        <h4>gemini_tools<span class="badge b-read">read</span></h4>
+        <div class="cli">tools</div>
+        <p>Lists Upload files, Add from Drive, More uploads, Create image, Create video, More tools and their on/off state.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_tool<span class="badge b-write">write</span></h4>
+        <div class="cli">tool &lt;name&gt; [on|off]</div>
+        <p>Toggles Create image, Create video, Create music, Canvas, Deep Research, Guided Learning, Personal Intelligence.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_attach<span class="badge b-write">write</span></h4>
+        <div class="cli">attach &lt;path...&gt;</div>
+        <p>Uploads local files: media goes to the image/video input, documents/code go to the document input.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-label">Driving the<br>chat</div>
+    <div class="grid">
+      <div class="action write">
+        <h4>gemini_ask<span class="badge b-write">write</span></h4>
+        <div class="cli">ask [--new-chat] [--mode chat|task] [--thinking] [--tool] [--attach] &lt;prompt&gt;</div>
+        <p>Types a prompt, sends it, waits for streaming to finish, returns <code>{answer, images, conversationId, url, timedOut}</code>.</p>
+      </div>
+      <div class="action control">
+        <h4>gemini_stop<span class="badge b-control">control</span></h4>
+        <div class="cli">stop</div>
+        <p>Clicks the in-app Stop button on a generation that is still streaming.</p>
+      </div>
+      <div class="action read">
+        <h4>gemini_screenshot<span class="badge b-read">read</span></h4>
+        <div class="cli">screenshot [path]</div>
+        <p>Captures the rendered page as a PNG and returns it as an MCP image (+ saved path).</p>
+      </div>
+    </div>
+  </div>
+
+  <h2>What gemini_ask does internally</h2>
+  <div class="pipeline">
+    <span class="step"><b>1</b> ensure CDP</span><span class="arrow">→</span>
+    <span class="step"><b>2</b> focus emulation</span><span class="arrow">→</span>
+    <span class="step"><b>3</b> mode (optional)</span><span class="arrow">→</span>
+    <span class="step"><b>4</b> model / thinking (optional)</span><span class="arrow">→</span>
+    <span class="step"><b>5</b> tools (optional)</span><span class="arrow">→</span>
+    <span class="step"><b>6</b> attachments (optional)</span><span class="arrow">→</span>
+    <span class="step"><b>7</b> clear composer</span><span class="arrow">→</span>
+    <span class="step"><b>8</b> insert prompt</span><span class="arrow">→</span>
+    <span class="step"><b>9</b> click send</span><span class="arrow">→</span>
+    <span class="step"><b>10</b> watch user-query</span><span class="arrow">→</span>
+    <span class="step"><b>11</b> wait for Stop to vanish</span><span class="arrow">→</span>
+    <span class="step"><b>12</b> text/image stable</span><span class="arrow">→</span>
+    <span class="step"><b>13</b> return answer</span>
+  </div>
+
+  <h2>Action matrix</h2>
+  <table>
+    <thead><tr><th>MCP tool</th><th>CLI</th><th>Kind</th><th>Side effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>gemini_setup</code></td><td><code>setup</code></td><td>control</td><td>patches app.asar, restarts Gemini</td></tr>
+      <tr><td><code>gemini_restore</code></td><td><code>restore</code></td><td>control</td><td>restores app.asar, restarts Gemini</td></tr>
+      <tr><td><code>gemini_status</code></td><td><code>status</code></td><td>read</td><td>none (may launch nothing)</td></tr>
+      <tr><td><code>gemini_ask</code></td><td><code>ask</code></td><td>write</td><td>adds a turn; optional mode, thinking, tools, attachments</td></tr>
+      <tr><td><code>gemini_model</code></td><td><code>model</code></td><td>write</td><td>switches the selected model</td></tr>
+      <tr><td><code>gemini_thinking</code></td><td><code>thinking</code></td><td>write</td><td>switches the thinking level</td></tr>
+      <tr><td><code>gemini_tools</code></td><td><code>tools</code></td><td>read</td><td>none (opens and closes the menu)</td></tr>
+      <tr><td><code>gemini_tool</code></td><td><code>tool</code></td><td>write</td><td>toggles a composer tool</td></tr>
+      <tr><td><code>gemini_attach</code></td><td><code>attach</code></td><td>write</td><td>uploads files into the composer</td></tr>
+      <tr><td><code>gemini_mode</code></td><td><code>mode</code></td><td>read/write</td><td>switches Chat/Task in a new chat</td></tr>
+      <tr><td><code>gemini_read</code></td><td><code>read</code></td><td>read</td><td>none</td></tr>
+      <tr><td><code>gemini_new_chat</code></td><td><code>new-chat</code></td><td>write</td><td>navigates to a new conversation; optional mode</td></tr>
+      <tr><td><code>gemini_conversations</code></td><td><code>conversations</code></td><td>read</td><td>none</td></tr>
+      <tr><td><code>gemini_open</code></td><td><code>open</code></td><td>write</td><td>navigates to an existing conversation</td></tr>
+      <tr><td><code>gemini_stop</code></td><td><code>stop</code></td><td>control</td><td>cancels the in-flight response</td></tr>
+      <tr><td><code>gemini_screenshot</code></td><td><code>screenshot</code></td><td>read</td><td>writes a PNG only when a path is given</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Guard rails</h2>
+  <div class="note">
+    Actions that write to the conversation require the app to be running with the debug port; the driver auto-runs the
+    equivalent of <b>setup</b> on first use, which restarts Gemini. Destructive/runtime actions
+    (<b>setup</b>, <b>restore</b>) are explicit tools so an agent can be asked before restarting the app.
+    <b>ask</b> returns promptly with <code>stopped: true</code> if a generation is cancelled, instead of hanging.
+    <br><br>
+    <b>Chat/Task mode</b> is a segmented control that only exists on a new chat; <b>status</b> reports
+    <code>mode</code>/<code>modeOptions</code> (null in an existing conversation). It is separate from the
+    model picker (<code>model</code>, e.g. Argon) and the thinking level.
+    <br><br>
+    Attachments and enabled tools persist in the composer until the next send; a new chat resets them.
+    When the answer is an image, <b>ask</b> returns <code>images</code> instead of text.
+  </div>
+</div>
+</body>
+</html>
