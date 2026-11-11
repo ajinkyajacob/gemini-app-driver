@@ -74,6 +74,13 @@ node bin/gemini-app-driver.js attach <path...>
 node bin/gemini-app-driver.js read [--json]
 node bin/gemini-app-driver.js new-chat [--mode chat|task]
 node bin/gemini-app-driver.js conversations [--limit n]
+node bin/gemini-app-driver.js notebooks [--limit n]
+node bin/gemini-app-driver.js open-notebook <id|title>
+node bin/gemini-app-driver.js notebook-chats
+node bin/gemini-app-driver.js open-notebook-chat <title>
+node bin/gemini-app-driver.js new-notebook <name>
+node bin/gemini-app-driver.js rename-notebook <name>
+node bin/gemini-app-driver.js delete-notebook
 node bin/gemini-app-driver.js open <id|partial title>
 node bin/gemini-app-driver.js stop
 node bin/gemini-app-driver.js screenshot [path]
@@ -138,9 +145,43 @@ client, for example:
 | `gemini_read` | — | Current conversation as ordered `{role, text}` messages |
 | `gemini_new_chat` | `mode?` | Start a fresh conversation in Chat or Task mode |
 | `gemini_conversations` | `limit?` | Sidebar conversations (`id`, `title`, `href`) |
+| `gemini_notebooks` | `limit?` | Notebooks from the sidebar (`id`, `title`, open one marked) |
+| `gemini_open_notebook` | `notebook` | Open a notebook by id or partial title; returns past chats |
+| `gemini_notebook_chats` | — | Past chats recorded in the open notebook |
+| `gemini_open_notebook_chat` | `title` | Open a past chat in the open notebook |
+| `gemini_new_notebook` | `name` | Create a notebook via `/notebooks/create` and open it |
+| `gemini_rename_notebook` | `name` | Rename the open notebook |
+| `gemini_delete_notebook` | — | Delete the open notebook (destructive, "Delete everywhere") |
 | `gemini_open` | `conversation` | Open by id or partial title; returns its messages |
 | `gemini_stop` | — | Stop an in-flight response |
 | `gemini_screenshot` | `path?` | Page screenshot as an MCP image (+ saved path) |
+
+## Notebooks
+
+The sidebar **Notebooks** section (Gemini's NotebookLM-backed projects, routes
+`/notebook/<uuid>`) is mapped too:
+
+```powershell
+node bin\gemini-app-driver.js notebooks
+node bin\gemini-app-driver.js open-notebook "Rust learning"
+node bin\gemini-app-driver.js notebook-chats
+node bin\gemini-app-driver.js open-notebook-chat "Simple Confirmation"
+node bin\gemini-app-driver.js new-notebook "Weekly research"
+node bin\gemini-app-driver.js rename-notebook "Weekly research v2"
+node bin\gemini-app-driver.js delete-notebook   # "Delete everywhere" confirmation
+```
+
+- `new-notebook` drives `/notebooks/create`: it fills the name and presses
+  **Create notebook**, then confirms the new `/notebook/<uuid>` route.
+- `rename-notebook` / `delete-notebook` use the notebook's settings menu
+  (Pin/Rename/Delete). Delete is destructive and wipes the notebook from both
+  Gemini and NotebookLM; the driver intentionally requires you to call it.
+- Asking from a notebook (`ask`) works: the chat opens as an `/app/<id>`
+  conversation but is recorded under the notebook's **Past chats**, so the
+  result reports the originating `notebookId`.
+- **Not automated:** the "Add sources" picker and NotebookLM source management.
+  Use the app for adding/removing sources; open, chat, rename, and delete are
+  covered.
 
 ## Sign-in and auth
 

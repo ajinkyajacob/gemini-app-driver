@@ -175,6 +175,47 @@
   </div>
 
   <div class="lane" style="margin-bottom:18px">
+    <div class="lane-label">Notebooks</div>
+    <div class="grid">
+      <div class="action read">
+        <h4>gemini_notebooks<span class="badge b-read">read</span></h4>
+        <div class="cli">notebooks [--limit]</div>
+        <p>Sidebar Notebooks (NotebookLM-backed projects) with id, title, and which one is open.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_open_notebook<span class="badge b-write">write</span></h4>
+        <div class="cli">open-notebook &lt;id|title&gt;</div>
+        <p>Opens /notebook/&lt;uuid&gt; and returns its past chats.</p>
+      </div>
+      <div class="action read">
+        <h4>gemini_notebook_chats<span class="badge b-read">read</span></h4>
+        <div class="cli">notebook-chats</div>
+        <p>Past chats recorded in the open notebook.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_open_notebook_chat<span class="badge b-write">write</span></h4>
+        <div class="cli">open-notebook-chat &lt;title&gt;</div>
+        <p>Opens a past chat from the notebook by title.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_new_notebook<span class="badge b-write">write</span></h4>
+        <div class="cli">new-notebook &lt;name&gt;</div>
+        <p>Drives /notebooks/create: fills the name, presses Create notebook, opens the result.</p>
+      </div>
+      <div class="action write">
+        <h4>gemini_rename_notebook<span class="badge b-write">write</span></h4>
+        <div class="cli">rename-notebook &lt;name&gt;</div>
+        <p>Settings menu → Rename → fill → Save.</p>
+      </div>
+      <div class="action control">
+        <h4>gemini_delete_notebook<span class="badge b-control">control</span></h4>
+        <div class="cli">delete-notebook</div>
+        <p>Settings menu → Delete → "Delete everywhere". Permanently removes it from Gemini and NotebookLM.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="lane" style="margin-bottom:18px">
     <div class="lane-label">Composer<br>toolbar</div>
     <div class="grid">
       <div class="action write">
@@ -261,6 +302,13 @@
       <tr><td><code>gemini_read</code></td><td><code>read</code></td><td>read</td><td>none</td></tr>
       <tr><td><code>gemini_new_chat</code></td><td><code>new-chat</code></td><td>write</td><td>navigates to a new conversation; optional mode</td></tr>
       <tr><td><code>gemini_conversations</code></td><td><code>conversations</code></td><td>read</td><td>none</td></tr>
+      <tr><td><code>gemini_notebooks</code></td><td><code>notebooks</code></td><td>read</td><td>none</td></tr>
+      <tr><td><code>gemini_open_notebook</code></td><td><code>open-notebook</code></td><td>write</td><td>navigates to /notebook/&lt;uuid&gt;</td></tr>
+      <tr><td><code>gemini_notebook_chats</code></td><td><code>notebook-chats</code></td><td>read</td><td>none</td></tr>
+      <tr><td><code>gemini_open_notebook_chat</code></td><td><code>open-notebook-chat</code></td><td>write</td><td>opens a notebook past chat</td></tr>
+      <tr><td><code>gemini_new_notebook</code></td><td><code>new-notebook</code></td><td>write</td><td>creates a notebook</td></tr>
+      <tr><td><code>gemini_rename_notebook</code></td><td><code>rename-notebook</code></td><td>write</td><td>renames the open notebook</td></tr>
+      <tr><td><code>gemini_delete_notebook</code></td><td><code>delete-notebook</code></td><td>control</td><td>permanently deletes notebook + sources + chats</td></tr>
       <tr><td><code>gemini_open</code></td><td><code>open</code></td><td>write</td><td>navigates to an existing conversation</td></tr>
       <tr><td><code>gemini_stop</code></td><td><code>stop</code></td><td>control</td><td>cancels the in-flight response</td></tr>
       <tr><td><code>gemini_screenshot</code></td><td><code>screenshot</code></td><td>read</td><td>writes a PNG only when a path is given</td></tr>
@@ -284,6 +332,10 @@
     <b>Auth:</b> the driver uses the app's existing Google session. If the app shows its sign-in screen or
     redirects to accounts.google.com, page actions fail with <code>SIGN_IN_REQUIRED</code>; run
     <b>login</b> to surface the window and wait, then retry.
+    <br><br>
+    <b>Notebooks</b> are NotebookLM-backed; opening, chatting, creating, renaming, and deleting are mapped.
+    The "Add sources" picker is not automated — manage sources in the app. Deleting a notebook is permanent
+    and removes it from both Gemini and NotebookLM.
   </div>
 </div>
 </body>

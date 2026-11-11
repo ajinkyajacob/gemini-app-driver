@@ -29,6 +29,13 @@ Usage:
   gemini-app-driver read [--json]              print the current conversation transcript
   gemini-app-driver new-chat [--mode chat|task] start a new conversation
   gemini-app-driver conversations [--limit n]  list sidebar conversations
+  gemini-app-driver notebooks [--limit n]      list Gemini notebooks
+  gemini-app-driver open-notebook <id|title>   open a notebook
+  gemini-app-driver notebook-chats             list past chats in the open notebook
+  gemini-app-driver open-notebook-chat <title> open a past chat in the open notebook
+  gemini-app-driver new-notebook <name>        create a notebook
+  gemini-app-driver rename-notebook <name>     rename the open notebook
+  gemini-app-driver delete-notebook            delete the open notebook (asks nothing)
   gemini-app-driver open <id|title>            open a conversation
   gemini-app-driver stop                       stop an in-flight response
   gemini-app-driver screenshot [path]          save a PNG of the Gemini page
@@ -299,6 +306,71 @@ export async function main(argv = process.argv.slice(2)) {
             process.stdout.write(`${conversation.id}  ${conversation.title}\n`);
           }
         }
+        return;
+      }
+
+      case 'notebooks': {
+        await ensureCdp({ port, log });
+        const result = await app.notebooks({ limit: Number(flags.limit || 50) });
+        if (flags.json) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        } else {
+          for (const notebook of result.notebooks) {
+            const marker = notebook.id === result.currentNotebook ? '*' : ' ';
+            process.stdout.write(`${marker} ${notebook.id}  ${notebook.title}\n`);
+          }
+        }
+        return;
+      }
+
+      case 'open-notebook': {
+        const query = positional.join(' ').trim();
+        if (!query) throw new Error('Missing notebook id or title.');
+        await ensureCdp({ port, log });
+        process.stdout.write(`${JSON.stringify(await app.openNotebook(query), null, 2)}\n`);
+        return;
+      }
+
+      case 'notebook-chats': {
+        await ensureCdp({ port, log });
+        const result = await app.notebookChats();
+        if (flags.json) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        } else {
+          for (const chat of result.chats) {
+            process.stdout.write(`${chat.when ? `${chat.when}  ` : ''}${chat.title}\n`);
+          }
+        }
+        return;
+      }
+
+      case 'open-notebook-chat': {
+        const title = positional.join(' ').trim();
+        if (!title) throw new Error('Missing notebook chat title.');
+        await ensureCdp({ port, log });
+        process.stdout.write(`${JSON.stringify(await app.openNotebookChat(title), null, 2)}\n`);
+        return;
+      }
+
+      case 'new-notebook': {
+        const name = positional.join(' ').trim();
+        if (!name) throw new Error('Missing notebook name.');
+        await ensureCdp({ port, log });
+        process.stdout.write(`${JSON.stringify(await app.newNotebook(name), null, 2)}\n`);
+        return;
+      }
+
+      case 'rename-notebook': {
+        const name = positional.join(' ').trim();
+        if (!name) throw new Error('Missing new notebook name.');
+        await ensureCdp({ port, log });
+        process.stdout.write(`${JSON.stringify(await app.renameNotebook(name), null, 2)}\n`);
+        return;
+      }
+
+      case 'delete-notebook': {
+        await ensureCdp({ port, log });
+        process.stdout.write(`${JSON.stringify(await app.deleteNotebook(), null, 2)}\n`);
         return;
       }
 

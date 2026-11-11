@@ -48,6 +48,7 @@ const SNAPSHOT_JS = `(() => {
   const stop = [...document.querySelectorAll('button')]
     .find((b) => /stop (response|generating)/i.test(b.getAttribute('aria-label') || ''));
   const conversation = (location.pathname.match(/^\\/app\\/([0-9a-f]+)/) || [])[1] || null;
+  const notebookMatch = location.pathname.match(/^\\/notebook\\/([0-9a-f-]{36})/i);
   const mode = document.querySelector('bard-mode-switcher');
   const modeRows = [...document.querySelectorAll('gem-segmented-button-row')];
   const modeRow = modeRows.find((row) => /chat/i.test(row.innerText || '') && /task/i.test(row.innerText || ''));
@@ -69,6 +70,7 @@ const SNAPSHOT_JS = `(() => {
   return {
     url: location.href,
     conversationId: conversation,
+    notebookId: notebookMatch ? notebookMatch[1] : null,
     editorText: editor ? editor.innerText : null,
     editorEmpty: editor ? editor.innerText.trim().length === 0 : null,
     editorPlaceholder: editor ? editor.getAttribute('data-placeholder') : null,
@@ -362,6 +364,7 @@ export class GeminiApp {
               stopped: true,
               url: snapshot.url,
               conversationId: snapshot.conversationId,
+              notebookId: snapshot.notebookId,
               streaming: false,
             };
           }
@@ -382,6 +385,7 @@ export class GeminiApp {
           timedOut: false,
           url: snapshot.url,
           conversationId: snapshot.conversationId,
+          notebookId: snapshot.notebookId,
           streaming: false,
         };
       }
@@ -395,6 +399,7 @@ export class GeminiApp {
         timedOut: true,
         url: snapshot.url,
         conversationId: snapshot.conversationId,
+        notebookId: snapshot.notebookId,
         streaming: snapshot.streaming,
       };
     }
@@ -425,7 +430,7 @@ export class GeminiApp {
       throw new Error('Gemini did not accept the prompt (no new user message appeared). The composer text was left in place.');
     }
     const answer = await this.waitForAnswer(before.messages.length, { timeoutMs });
-    return { ...answer, prompt };
+    return { ...answer, prompt, notebookId: answer.notebookId || before.notebookId || null };
   }
 
   ask(prompt, options) {
@@ -509,8 +514,9 @@ export class GeminiApp {
       const panes = [...document.querySelectorAll('.cdk-overlay-pane')].filter((p) => p.getClientRects().length);
       for (const pane of panes) {
         if (pane.querySelector('[role="menuitemradio"][data-mode-id]')) return 'model';
-        const labels = [...pane.querySelectorAll('button')].map((b) => ((b.innerText || '').trim().split('\\n')[0] || '').trim());
+        const labels = [...pane.querySelectorAll('button, [role="menuitem"]')].map((b) => ((b.innerText || '').trim().split('\\n')[0] || '').trim());
         if (labels.includes('Upload files')) return 'tools';
+        if (labels.includes('Rename') && labels.includes('Delete')) return 'notebook';
       }
       return null;
     })()`);
@@ -520,7 +526,9 @@ export class GeminiApp {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const kind = await this.openMenuKind();
       if (!kind) return;
-      const toggleRegex = kind === 'model' ? 'open mode picker' : 'upload and tools';
+      const toggleRegex = kind === 'model' ? 'open mode picker'
+        : kind === 'notebook' ? 'notebook settings'
+          : 'upload and tools';
       await this.evaluate(`(() => {
         const button = [...document.querySelectorAll('button')]
           .find((b) => new RegExp(${JSON.stringify(toggleRegex)}, 'i').test(b.getAttribute('aria-label') || ''));
@@ -928,6 +936,7 @@ export class GeminiApp {
     return {
       url: snap.url,
       conversationId: snap.conversationId,
+      notebookId: snap.notebookId,
       model: snap.model,
       streaming: snap.streaming,
       messages: snap.messages,
@@ -989,6 +998,251 @@ export class GeminiApp {
 
   openConversation(query) {
     return this.serialize(() => this.openConversationImpl(query));
+  }
+
+  async notebooksImpl({ limit = 50 } = {}) {
+    await this.ready();
+    const notebooks = await this.evaluate(`(() => {
+      const seen = new Set();
+      const out = [];
+      for (const anchor of document.querySelectorAll('a[href]')) {
+        const href = anchor.getAttribute('href') || '';
+        const match = href.match(/^\\/notebook\\/([0-9a-f-]{36})$/i);
+        if (!match || seen.has(match[1])) continue;
+        const title = (anchor.getAttribute('aria-label') || anchor.innerText || '').trim();
+        if (!title) continue;
+        seen.add(match[1]);
+        out.push({ id: match[1], title, href });
+      }
+      return out;
+    })()`);
+    const currentNotebook = await this.evaluate(`(() => {
+      const match = location.pathname.match(/^\\/notebook\\/([0-9a-f-]{36})/i);
+      return match ? match[1] : null;
+    })()`);
+    return { currentNotebook, notebooks: notebooks.slice(0, limit) };
+  }
+
+  notebooks(options) {
+    return this.serialize(() => this.notebooksImpl(options));
+  }
+
+  async readNotebookChats() {
+    return this.evaluate(`(() => [...document.querySelectorAll('button[aria-label="Navigate to a recent chat in a notebook"]')].map((button) => {
+      const lines = (button.innerText || '').trim().split('\\n').map((line) => line.trim()).filter(Boolean);
+      return { title: lines[0] || '', when: lines[1] || '' };
+    }))()`);
+  }
+
+  async waitForNotebookChats(timeoutMs = 6000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const chats = await this.readNotebookChats();
+      if (chats.length > 0) return chats;
+      const empty = await this.evaluate(`/Notebook chats will appear here/i.test(document.querySelector('project-editor-window-v2')?.innerText || '')`);
+      if (empty) return [];
+      await sleep(400);
+    }
+    return this.readNotebookChats();
+  }
+
+  async openNotebookImpl(query) {
+    const { notebooks } = await this.notebooksImpl();
+    const needle = String(query || '').trim().toLowerCase();
+    const found = notebooks.find((item) => item.id === needle)
+      || notebooks.find((item) => item.title.toLowerCase() === needle)
+      || notebooks.find((item) => item.title.toLowerCase().includes(needle));
+    if (!found) {
+      const sample = notebooks.slice(0, 10).map((item) => `- ${item.title} (${item.id})`).join('\n');
+      throw new Error(`No notebook matched "${query}". Some notebooks:\n${sample}`);
+    }
+    await this.connect();
+    await this.withClient((client) => client.navigate(`https://gemini.google.com${found.href}`));
+    const snap = await this.ready();
+    const pastChats = await this.waitForNotebookChats();
+    return { notebook: found, url: snap.url, notebookId: snap.notebookId, pastChats };
+  }
+
+  openNotebook(query) {
+    return this.serialize(() => this.openNotebookImpl(query));
+  }
+
+  async notebookChatsImpl() {
+    const snap = await this.ready();
+    if (!snap.notebookId) throw new Error('Open a notebook first (run open-notebook).');
+    const chats = await this.waitForNotebookChats();
+    return { notebookId: snap.notebookId, chats };
+  }
+
+  notebookChats() {
+    return this.serialize(() => this.notebookChatsImpl());
+  }
+
+  async openNotebookChatImpl(title) {
+    const wanted = String(title ?? '').trim();
+    if (!wanted) throw new Error('chat title is required');
+    const snap = await this.ready();
+    if (!snap.notebookId) throw new Error('Open a notebook first (run open-notebook).');
+    const clicked = await this.evaluate(`(() => {
+      const buttons = [...document.querySelectorAll('button[aria-label="Navigate to a recent chat in a notebook"]')];
+      const wanted = ${JSON.stringify(wanted)}.toLowerCase();
+      const titleOf = (button) => ((button.innerText || '').trim().split('\\n')[0] || '').trim().toLowerCase();
+      const target = buttons.find((button) => titleOf(button) === wanted)
+        || buttons.find((button) => titleOf(button).includes(wanted));
+      if (!target) return false;
+      target.click();
+      return true;
+    })()`);
+    if (!clicked) throw new Error(`No past chat matched "${title}" in this notebook.`);
+    await sleep(1200);
+    const after = await this.ready();
+    return { url: after.url, conversationId: after.conversationId };
+  }
+
+  openNotebookChat(title) {
+    return this.serialize(() => this.openNotebookChatImpl(title));
+  }
+
+  async newNotebookImpl(name) {
+    const title = String(name ?? '').trim();
+    if (!title) throw new Error('notebook name is required');
+    await this.connect();
+    await this.withClient((client) => client.navigate('https://gemini.google.com/notebooks/create'));
+
+    const deadline = Date.now() + 20000;
+    let hasInput = false;
+    while (Date.now() < deadline) {
+      hasInput = await this.evaluate(`(() => {
+        const input = document.querySelector('input[placeholder="Project or idea"], input[aria-label="Name of the notebook"]');
+        if (!input) return false;
+        input.focus();
+        return true;
+      })()`);
+      if (hasInput) break;
+      await sleep(400);
+    }
+    if (!hasInput) throw new Error('Notebook creation form did not appear.');
+
+    await this.withClient((client) => client.send('Input.insertText', { text: title }));
+    await sleep(500);
+    const clicked = await this.evaluate(`(() => {
+      const button = [...document.querySelectorAll('button')]
+        .find((b) => b.getAttribute('aria-label') === 'Create notebook' && b.closest('form'));
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    if (!clicked) throw new Error('Could not find the "Create notebook" button.');
+
+    const created = Date.now() + 30000;
+    let snap = null;
+    while (Date.now() < created) {
+      await sleep(700);
+      snap = await this.snapshot().catch(() => null);
+      if (snap?.notebookId) break;
+    }
+    if (!snap?.notebookId) throw new Error('Notebook was not created in time.');
+    await this.ready();
+    return { id: snap.notebookId, name: title, url: snap.url };
+  }
+
+  newNotebook(name) {
+    return this.serialize(() => this.newNotebookImpl(name));
+  }
+
+  async openNotebookMenu() {
+    const opened = await this.evaluate(`(() => {
+      const button = [...document.querySelectorAll('button')]
+        .find((b) => /notebook settings/i.test(b.getAttribute('aria-label') || ''));
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    if (!opened) return false;
+    await sleep(700);
+    return this.isMenuOpen();
+  }
+
+  async renameNotebookImpl(name) {
+    const title = String(name ?? '').trim();
+    if (!title) throw new Error('new notebook name is required');
+    const before = await this.snapshot();
+    if (!before.notebookId) throw new Error('Open a notebook first (run open-notebook).');
+    if (!(await this.openNotebookMenu())) throw new Error('Notebook settings menu was not found.');
+    if (!(await this.clickMenuItem('Rename'))) throw new Error('Could not open the rename dialog.');
+    await sleep(900);
+
+    const focused = await this.evaluate(`(() => {
+      const input = document.querySelector('mat-dialog-container input[aria-label="Rename notebook"]');
+      if (!input) return false;
+      input.focus();
+      return true;
+    })()`);
+    if (!focused) throw new Error('Rename dialog did not appear.');
+    await this.key({ type: 'rawKeyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+    await this.key({ type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, modifiers: 2 });
+    await this.key({ type: 'rawKeyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+    await this.key({ type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8, nativeVirtualKeyCode: 8 });
+    await this.withClient((client) => client.send('Input.insertText', { text: title }));
+    await sleep(300);
+
+    const saved = await this.evaluate(`(() => {
+      const button = [...document.querySelectorAll('mat-dialog-container button')]
+        .find((b) => (b.innerText || '').trim() === 'Save');
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    if (!saved) throw new Error('Could not save the renamed notebook.');
+    await sleep(1800);
+    const updated = await this.evaluate(`(() => (document.querySelector('project-editor-window-v2')?.innerText || '').trim().slice(0, 200))()`);
+    if (!updated.includes(title)) throw new Error(`Rename did not apply (editor shows: ${updated.slice(0, 80)}).`);
+    return { id: before.notebookId, name: title, url: before.url };
+  }
+
+  renameNotebook(name) {
+    return this.serialize(() => this.renameNotebookImpl(name));
+  }
+
+  async deleteNotebookImpl() {
+    const before = await this.snapshot();
+    if (!before.notebookId) throw new Error('Open a notebook first (run open-notebook).');
+    if (!(await this.openNotebookMenu())) throw new Error('Notebook settings menu was not found.');
+    if (!(await this.clickMenuItem('Delete'))) throw new Error('Could not open the delete dialog.');
+    await sleep(900);
+
+    const confirmed = await this.evaluate(`(() => {
+      const buttons = [...document.querySelectorAll('mat-dialog-container button, [role="dialog"] button')];
+      const button = buttons.find((b) => /^delete( everywhere)?$/i.test((b.innerText || '').trim()));
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`);
+    if (!confirmed) throw new Error('Delete confirmation dialog did not appear.');
+
+    const deadline = Date.now() + 35000;
+    let url = before.url;
+    while (Date.now() < deadline) {
+      await sleep(700);
+      url = await this.evaluate('location.href');
+      if (!/\/notebook\/[0-9a-f-]{36}/i.test(url)) break;
+    }
+    if (/\/notebook\/[0-9a-f-]{36}/i.test(url)) {
+      // Slow redirects happen; confirm against the sidebar instead.
+      await this.connect();
+      await this.withClient((client) => client.navigate(GEMINI_URL));
+      const snap = await this.ready();
+      const { notebooks } = await this.notebooksImpl();
+      if (!notebooks.some((item) => item.id === before.notebookId)) {
+        return { deleted: true, id: before.notebookId, url: snap.url };
+      }
+      throw new Error('Notebook still open after delete.');
+    }
+    return { deleted: true, id: before.notebookId, url };
+  }
+
+  deleteNotebook() {
+    return this.serialize(() => this.deleteNotebookImpl());
   }
 
   async stopImpl() {

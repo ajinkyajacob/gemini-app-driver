@@ -158,6 +158,66 @@ const TOOLS = [
     },
   },
   {
+    name: 'gemini_notebooks',
+    description: 'List Gemini notebooks (sidebar Notebooks section), with ids, titles, and which one is open.',
+    inputSchema: {
+      type: 'object',
+      properties: { limit: { type: 'number', description: 'Maximum notebooks to return (default 50).' } },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'gemini_open_notebook',
+    description: 'Open a notebook by id or partial title. After opening, gemini_ask works inside that notebook.',
+    inputSchema: {
+      type: 'object',
+      properties: { notebook: { type: 'string', description: 'Notebook id or title text.' } },
+      required: ['notebook'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'gemini_notebook_chats',
+    description: 'List past chats recorded in the currently open notebook.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'gemini_open_notebook_chat',
+    description: 'Open a past chat in the currently open notebook by (partial) title.',
+    inputSchema: {
+      type: 'object',
+      properties: { title: { type: 'string', description: 'Chat title text.' } },
+      required: ['title'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'gemini_new_notebook',
+    description: 'Create a new notebook with the given name via the /notebooks/create flow and open it.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'Notebook name.' } },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'gemini_rename_notebook',
+    description: 'Rename the currently open notebook.',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string', description: 'New notebook name.' } },
+      required: ['name'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'gemini_delete_notebook',
+    description:
+      'Delete the currently open notebook (destructive, no extra confirmation beyond the app dialog). Open the intended notebook first.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'gemini_conversations',
     description: 'List conversations from the Gemini sidebar with their ids and titles.',
     inputSchema: {
@@ -405,6 +465,52 @@ export class McpServer {
         await this.ensure();
         const result = await this.app.newChat({ mode: args.mode });
         return { content: [{ type: 'text', text: jsonText({ ok: true, ...result }) }] };
+      }
+
+      case 'gemini_notebooks': {
+        await this.ensure();
+        const result = await this.app.notebooks({ limit: Number(args.limit || 50) });
+        return { content: [{ type: 'text', text: jsonText(result) }] };
+      }
+
+      case 'gemini_open_notebook': {
+        if (!args.notebook) throw new Error('notebook is required');
+        await this.ensure();
+        const result = await this.app.openNotebook(args.notebook);
+        return { content: [{ type: 'text', text: jsonText(result) }] };
+      }
+
+      case 'gemini_notebook_chats': {
+        await this.ensure();
+        const result = await this.app.notebookChats();
+        return { content: [{ type: 'text', text: jsonText(result) }] };
+      }
+
+      case 'gemini_open_notebook_chat': {
+        if (!args.title) throw new Error('title is required');
+        await this.ensure();
+        const result = await this.app.openNotebookChat(args.title);
+        return { content: [{ type: 'text', text: jsonText(result) }] };
+      }
+
+      case 'gemini_new_notebook': {
+        if (!args.name) throw new Error('name is required');
+        await this.ensure();
+        const result = await this.app.newNotebook(args.name);
+        return { content: [{ type: 'text', text: jsonText({ ok: true, ...result }) }] };
+      }
+
+      case 'gemini_rename_notebook': {
+        if (!args.name) throw new Error('name is required');
+        await this.ensure();
+        const result = await this.app.renameNotebook(args.name);
+        return { content: [{ type: 'text', text: jsonText({ ok: true, ...result }) }] };
+      }
+
+      case 'gemini_delete_notebook': {
+        await this.ensure();
+        const result = await this.app.deleteNotebook();
+        return { content: [{ type: 'text', text: jsonText(result) }] };
       }
 
       case 'gemini_conversations': {
