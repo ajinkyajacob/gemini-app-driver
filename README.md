@@ -10,6 +10,10 @@ signed in inside the app.
 
 No API key, no browser automation of gemini.google.com, no copy-pasting.
 
+**Action map:** https://ajinkyajacob.github.io/gemini-app-driver/ — a visual
+diagram of every CLI command and MCP tool, published from `docs/` via GitHub
+Pages and rebuilt on every push.
+
 ## Why this works
 
 The Gemini Windows app is Electron (v1.18.0, Chromium 152). It checks its own
