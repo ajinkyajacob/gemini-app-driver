@@ -28,8 +28,10 @@ Pg ? (log + app.exit(1)) : start()
 
 `setup` flips that argument to `false` with a byte-for-byte, same-length patch
 inside `app.asar` (so the archive's header and integrity hashes stay valid), then
-starts the app with the DevTools port. The original archive is kept next to it as
-`app.asar.driver-backup`, and `restore` puts it back.
+starts the app with the DevTools port. The patch matches the *shape* of the
+check rather than symbol names, so it survived the 1.18 → 1.19 rename. The
+original archive is kept next to it as `app.asar.driver-backup`, and `restore`
+puts it back.
 
 The driver then attaches to the `https://gemini.google.com/app` target and works
 through the page's own DOM (composer, send button, `user-query` / `model-response`
@@ -285,6 +287,32 @@ Use `screenshot` to capture the generated image. Over MCP the same calls are
 `gemini_model`, `gemini_thinking`, `gemini_tools`, `gemini_tool`, `gemini_attach`,
 and `gemini_ask` accepts `tools`, `attachments`, and `thinking`.
 
+## Pacing and rate limits
+
+The driver deliberately behaves slowly, because rapid automated prompts can get a
+Google account flagged. These guard rails are on by default:
+
+- **One action at a time across processes.** A lock file serializes CLI and MCP
+  calls, so menus never race and two sends can't overlap.
+- **Minimum gap between prompts:** 30 s (± jitter) — enforced across invocations.
+- **Hourly cap:** 20 prompts per hour per machine.
+- **Human typing:** prompts up to 800 characters are typed character by
+  character with randomized 30–85 ms delays and occasional pauses; longer prompts
+  are pasted in.
+- **Jittered waits** around send, polling and menu interactions.
+
+Tune only if you understand the risk:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `GEMINI_DRIVER_HUMANIZE` | `1` | Set `0` to disable pacing entirely |
+| `GEMINI_DRIVER_MIN_GAP_MS` | `30000` | Minimum gap between prompts |
+| `GEMINI_DRIVER_MAX_PER_HOUR` | `20` | Prompt budget per rolling hour |
+| `GEMINI_DRIVER_STATE_DIR` | `%LOCALAPPDATA%\\gemini-driver` | Lock/state location |
+
+`status` reports the active pacing settings. If you hit the hourly cap, the
+driver refuses to send instead of pushing through.
+
 ## How it is put together
 
 | File | Purpose |
@@ -312,3 +340,7 @@ Operational notes:
 ## Environment
 
 - `GEMINI_DRIVER_PORT` — DevTools port (default `9333`).
+- `GEMINI_DRIVER_HUMANIZE` — `0` disables pacing (not recommended).
+- `GEMINI_DRIVER_MIN_GAP_MS` — minimum gap between prompts (default `30000`).
+- `GEMINI_DRIVER_MAX_PER_HOUR` — prompt budget per rolling hour (default `20`).
+- `GEMINI_DRIVER_STATE_DIR` — lock/state directory (default `%LOCALAPPDATA%\\gemini-driver`).

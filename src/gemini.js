@@ -3,6 +3,7 @@ import path from 'node:path';
 import { CdpClient } from './cdp.js';
 import { classifyTargets, getAuthState, listTargets, sleep } from './app.js';
 import { AuthRequiredError, SIGN_IN_HINT } from './auth.js';
+import { humanize, jitter, recordPrompt, waitForPromptGap, withFileLock } from './pacing.js';
 
 const GEMINI_URL = 'https://gemini.google.com/app';
 
@@ -95,10 +96,19 @@ export class GeminiApp {
     this.queue = Promise.resolve();
   }
 
-  serialize(task) {
-    const run = this.queue.then(task, task);
+  serialize(task, { lock = false } = {}) {
+    const execute = () => (lock ? withFileLock(task) : task());
+    const run = this.queue.then(execute, execute);
     this.queue = run.catch(() => {});
     return run;
+  }
+
+  locked(task) {
+    return this.serialize(task, { lock: true });
+  }
+
+  read(task) {
+    return this.serialize(task, { lock: false });
   }
 
   async connect({ force = false } = {}) {
@@ -186,7 +196,7 @@ export class GeminiApp {
   }
 
   authStatus() {
-    return this.serialize(() => this.authStatusImpl());
+    return this.read(() => this.authStatusImpl());
   }
 
   async bringToFrontImpl() {
@@ -230,7 +240,7 @@ export class GeminiApp {
   }
 
   login(options) {
-    return this.serialize(() => this.loginImpl(options));
+    return this.locked(() => this.loginImpl(options));
   }
 
   async focusEditor() {
@@ -270,10 +280,19 @@ export class GeminiApp {
   }
 
   async typePrompt(prompt) {
+    const text = String(prompt);
     await this.focusEditor();
-    const lines = String(prompt).split('\n');
+    const lines = text.split('\n');
+    const humanType = humanize && text.length <= 800;
     for (let i = 0; i < lines.length; i += 1) {
-      if (lines[i].length > 0) {
+      if (humanType) {
+        for (const char of lines[i]) {
+          await this.key({ type: 'keyDown', key: char, text: char, unmodifiedText: char });
+          await this.key({ type: 'keyUp', key: char });
+          await sleep(jitter(55, 0.7));
+          if (Math.random() < 0.02) await sleep(jitter(350, 0.6));
+        }
+      } else if (lines[i].length > 0) {
         await this.withClient((client) => client.send('Input.insertText', { text: lines[i] }));
       }
       if (i < lines.length - 1) {
@@ -293,9 +312,10 @@ export class GeminiApp {
           nativeVirtualKeyCode: 13,
           modifiers: 8,
         });
+        await sleep(jitter(180, 0.5));
       }
     }
-    await sleep(250);
+    await sleep(jitter(300, 0.5));
     const snap = await this.snapshot();
     if (normalizeText(snap.editorText) !== normalizeText(prompt)) {
       throw new Error(`Composer did not accept the full prompt (got: "${normalizeText(snap.editorText).slice(0, 120)}").`);
@@ -419,6 +439,9 @@ export class GeminiApp {
     await this.clearComposer();
     await this.typePrompt(prompt);
 
+    await waitForPromptGap((line) => this.log(line));
+    await sleep(jitter(450, 0.8));
+
     let sent = false;
     for (let attempt = 0; attempt < 3 && !sent; attempt += 1) {
       if (attempt === 0) await this.clickSendButton();
@@ -426,6 +449,7 @@ export class GeminiApp {
       else await this.mouseClickSendButton();
       sent = await this.waitForSent(before.messages.length, 8000);
     }
+    if (sent) recordPrompt();
     if (!sent) {
       throw new Error('Gemini did not accept the prompt (no new user message appeared). The composer text was left in place.');
     }
@@ -434,7 +458,7 @@ export class GeminiApp {
   }
 
   ask(prompt, options) {
-    return this.serialize(() => this.askImpl(prompt, options));
+    return this.locked(() => this.askImpl(prompt, options));
   }
 
   async newChatImpl({ mode } = {}) {
@@ -446,7 +470,7 @@ export class GeminiApp {
   }
 
   newChat(options) {
-    return this.serialize(() => this.newChatImpl(options));
+    return this.locked(() => this.newChatImpl(options));
   }
 
   async setModeImpl(mode) {
@@ -493,7 +517,7 @@ export class GeminiApp {
   }
 
   setMode(mode) {
-    return this.serialize(() => this.setModeImpl(mode));
+    return this.locked(() => this.setModeImpl(mode));
   }
 
   async waitForToolbar(timeoutMs = 10000) {
@@ -641,7 +665,7 @@ export class GeminiApp {
     })()`);
     const models = await this.evaluate(`(() => {
       const panes = [...document.querySelectorAll('.cdk-overlay-pane')].filter((p) => p.getClientRects().length);
-      const isModelLine = (line) => ['flash', 'pro', 'argon', 'ultra'].some((word) => line.toLowerCase().includes(word));
+      const isModelLine = (line) => /^[0-9]/.test(line) || ['flash', 'pro', 'argon', 'ultra'].some((word) => line.toLowerCase().includes(word));
       const seen = new Set();
       const out = [];
       for (const pane of panes) {
@@ -682,7 +706,7 @@ export class GeminiApp {
   }
 
   models() {
-    return this.serialize(() => this.modelsImpl());
+    return this.read(() => this.modelsImpl());
   }
 
   async thinkingImpl() {
@@ -705,7 +729,7 @@ export class GeminiApp {
   }
 
   thinking() {
-    return this.serialize(() => this.thinkingImpl());
+    return this.read(() => this.thinkingImpl());
   }
 
   async setThinkingImpl(level) {
@@ -732,7 +756,7 @@ export class GeminiApp {
   }
 
   setThinking(level) {
-    return this.serialize(() => this.setThinkingImpl(level));
+    return this.locked(() => this.setThinkingImpl(level));
   }
 
   async setModelImpl(name) {
@@ -774,7 +798,7 @@ export class GeminiApp {
   }
 
   setModel(name) {
-    return this.serialize(() => this.setModelImpl(name));
+    return this.locked(() => this.setModelImpl(name));
   }
 
   async toolsImpl() {
@@ -796,7 +820,7 @@ export class GeminiApp {
   }
 
   tools() {
-    return this.serialize(() => this.toolsImpl());
+    return this.read(() => this.toolsImpl());
   }
 
   async setToolImpl(name, enabled = true) {
@@ -840,7 +864,7 @@ export class GeminiApp {
   }
 
   setTool(name, enabled) {
-    return this.serialize(() => this.setToolImpl(name, enabled));
+    return this.locked(() => this.setToolImpl(name, enabled));
   }
 
   async attachImpl(paths) {
@@ -928,7 +952,7 @@ export class GeminiApp {
   }
 
   attach(paths) {
-    return this.serialize(() => this.attachImpl(paths));
+    return this.locked(() => this.attachImpl(paths));
   }
 
   async transcriptImpl() {
@@ -944,7 +968,7 @@ export class GeminiApp {
   }
 
   transcript() {
-    return this.serialize(() => this.transcriptImpl());
+    return this.read(() => this.transcriptImpl());
   }
 
   async conversationsImpl({ limit = 50 } = {}) {
@@ -970,7 +994,7 @@ export class GeminiApp {
   }
 
   conversations(options) {
-    return this.serialize(() => this.conversationsImpl(options));
+    return this.read(() => this.conversationsImpl(options));
   }
 
   async openConversationImpl(query) {
@@ -997,7 +1021,7 @@ export class GeminiApp {
   }
 
   openConversation(query) {
-    return this.serialize(() => this.openConversationImpl(query));
+    return this.locked(() => this.openConversationImpl(query));
   }
 
   async notebooksImpl({ limit = 50 } = {}) {
@@ -1024,7 +1048,7 @@ export class GeminiApp {
   }
 
   notebooks(options) {
-    return this.serialize(() => this.notebooksImpl(options));
+    return this.read(() => this.notebooksImpl(options));
   }
 
   async readNotebookChats() {
@@ -1064,7 +1088,7 @@ export class GeminiApp {
   }
 
   openNotebook(query) {
-    return this.serialize(() => this.openNotebookImpl(query));
+    return this.locked(() => this.openNotebookImpl(query));
   }
 
   async notebookChatsImpl() {
@@ -1075,7 +1099,7 @@ export class GeminiApp {
   }
 
   notebookChats() {
-    return this.serialize(() => this.notebookChatsImpl());
+    return this.read(() => this.notebookChatsImpl());
   }
 
   async openNotebookChatImpl(title) {
@@ -1100,7 +1124,7 @@ export class GeminiApp {
   }
 
   openNotebookChat(title) {
-    return this.serialize(() => this.openNotebookChatImpl(title));
+    return this.locked(() => this.openNotebookChatImpl(title));
   }
 
   async newNotebookImpl(name) {
@@ -1147,7 +1171,7 @@ export class GeminiApp {
   }
 
   newNotebook(name) {
-    return this.serialize(() => this.newNotebookImpl(name));
+    return this.locked(() => this.newNotebookImpl(name));
   }
 
   async openNotebookMenu() {
@@ -1201,7 +1225,7 @@ export class GeminiApp {
   }
 
   renameNotebook(name) {
-    return this.serialize(() => this.renameNotebookImpl(name));
+    return this.locked(() => this.renameNotebookImpl(name));
   }
 
   async deleteNotebookImpl() {
@@ -1242,7 +1266,7 @@ export class GeminiApp {
   }
 
   deleteNotebook() {
-    return this.serialize(() => this.deleteNotebookImpl());
+    return this.locked(() => this.deleteNotebookImpl());
   }
 
   async stopImpl() {
@@ -1265,7 +1289,7 @@ export class GeminiApp {
   }
 
   stop() {
-    return this.serialize(() => this.stopImpl());
+    return this.locked(() => this.stopImpl());
   }
 
   async screenshotBuffer() {

@@ -3,6 +3,7 @@ import { DEFAULT_PORT, ensureCdp, isCdpAlive, isRunning, restore, setup } from '
 import { GeminiApp } from './gemini.js';
 import { guardStatus } from './guard.js';
 import { McpServer } from './mcp.js';
+import { pacingInfo } from './pacing.js';
 import { resolveInstall } from './paths.js';
 
 const HELP = `gemini-app-driver — drive the Gemini desktop app from an agent
@@ -125,6 +126,7 @@ export async function main(argv = process.argv.slice(2)) {
           running: await isRunning(),
           cdp: await isCdpAlive(port),
           port,
+          pacing: pacingInfo(),
         };
         if (status.cdp) {
           const auth = await app.authStatus().catch((error) => ({ state: 'unknown', hint: error.message }));

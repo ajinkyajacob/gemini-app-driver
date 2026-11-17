@@ -333,6 +333,9 @@
     redirects to accounts.google.com, page actions fail with <code>SIGN_IN_REQUIRED</code>; run
     <b>login</b> to surface the window and wait, then retry.
     <br><br>
+    <b>Pacing:</b> actions are serialized across processes and prompts are rate-limited
+    (30 s gap, 20/hour) with human-speed typing, to avoid tripping Google's abuse checks.
+    <br><br>
     <b>Notebooks</b> are NotebookLM-backed; opening, chatting, creating, renaming, and deleting are mapped.
     The "Add sources" picker is not automated — manage sources in the app. Deleting a notebook is permanent
     and removes it from both Gemini and NotebookLM.

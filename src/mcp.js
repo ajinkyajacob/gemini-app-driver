@@ -1,6 +1,7 @@
 import { DEFAULT_PORT, ensureCdp, isCdpAlive, isRunning, restore, setup } from './app.js';
 import { GeminiApp } from './gemini.js';
 import { guardStatus } from './guard.js';
+import { pacingInfo } from './pacing.js';
 import { resolveInstall } from './paths.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
@@ -285,6 +286,7 @@ export class McpServer {
       running,
       cdp,
       port: this.port,
+      pacing: pacingInfo(),
     };
     if (!cdp) return base;
     const auth = await this.app.authStatus().catch((error) => ({ state: 'unknown', hint: error.message }));
